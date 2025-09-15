@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Steganography Encoder/Decoder</title>
+    <title>Steganography Suite</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         
@@ -239,17 +239,21 @@
             background: var(--border-primary);
         }
 
+        .progress-container {
+            margin: 20px 0;
+            display: none;
+        }
+
+        .progress-container.show {
+            display: block;
+        }
+
         .progress-bar {
             background: var(--bg-tertiary);
             border-radius: 8px;
             height: 8px;
             overflow: hidden;
-            margin: 20px 0;
-            display: none;
-        }
-
-        .progress-bar.show {
-            display: block;
+            margin-bottom: 8px;
         }
 
         .progress-fill {
@@ -257,6 +261,12 @@
             height: 100%;
             width: 0%;
             transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            text-align: center;
         }
 
         .result-area {
@@ -348,6 +358,16 @@
             color: var(--success);
         }
 
+        .capacity-info {
+            background: rgba(88, 166, 255, 0.1);
+            border: 1px solid rgba(88, 166, 255, 0.2);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin: 16px 0;
+            font-size: 0.9rem;
+            color: var(--text-accent);
+        }
+
         .hidden {
             display: none !important;
         }
@@ -398,8 +418,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Steganography Suite</h1>
-            <p>Advanced image data concealment and extraction</p>
+            <h1>Steganographic Encryption</h1>
+            <p>Steganographic Image data encryption and extraction</p>
         </div>
 
         <div class="tabs">
@@ -414,10 +434,12 @@
                     <div class="upload-text">
                         <h3>Select Host Image</h3>
                         <p>Click here or drag & drop an image file</p>
-                        <small>Supports PNG, JPG, JPEG formats</small>
+                        <small>Supports PNG, JPG, JPEG formats (up to 10MB)</small>
                     </div>
                 </div>
                 <input type="file" id="imageFile" accept="image/*" class="hidden">
+                
+                <div id="imageCapacity" class="capacity-info hidden"></div>
                 
                 <div class="form-group">
                     <label class="form-label" for="secretText">Secret Text Message</label>
@@ -438,8 +460,11 @@
                     🔒 Encode Data
                 </button>
 
-                <div class="progress-bar" id="encodeProgress">
-                    <div class="progress-fill"></div>
+                <div class="progress-container" id="encodeProgress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <div class="progress-text">Processing...</div>
                 </div>
 
                 <div id="encodeResult" class="result-area">
@@ -477,8 +502,11 @@
                     🔓 Decode Data
                 </button>
 
-                <div class="progress-bar" id="decodeProgress">
-                    <div class="progress-fill"></div>
+                <div class="progress-container" id="decodeProgress">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <div class="progress-text">Processing...</div>
                 </div>
 
                 <div id="decodeResult" class="result-area">
@@ -494,7 +522,10 @@
 
     <script>
         let currentImage = null;
+        let currentDecodeImage = null;
         let encodedImageData = null;
+        const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+        const CHUNK_SIZE = 10000; // Process in chunks for large images
 
         document.addEventListener('DOMContentLoaded', function() {
             setupDragAndDrop('imageUpload', 'imageFile');
@@ -545,6 +576,11 @@
                 return;
             }
 
+            if (file.size > MAX_FILE_SIZE) {
+                showAlert(`File size too large. Maximum allowed: ${MAX_FILE_SIZE / (1024 * 1024)}MB`, 'error');
+                return;
+            }
+
             const reader = new FileReader();
             reader.onload = function(e) {
                 const img = new Image();
@@ -552,16 +588,25 @@
                     if (isEncode) {
                         currentImage = img;
                         document.getElementById('encodeBtn').disabled = false;
-                        updateUploadArea('imageUpload', `✅ ${file.name} ready`);
+                        updateUploadArea('imageUpload', `✅ ${file.name} ready (${(file.size / 1024).toFixed(1)}KB)`);
+                        showCapacityInfo(img.width * img.height);
                     } else {
-                        currentImage = img;
+                        currentDecodeImage = img;
                         document.getElementById('decodeBtn').disabled = false;
-                        updateUploadArea('decodeUpload', `✅ ${file.name} ready`);
+                        updateUploadArea('decodeUpload', `✅ ${file.name} ready (${(file.size / 1024).toFixed(1)}KB)`);
                     }
                 };
                 img.src = e.target.result;
             };
             reader.readAsDataURL(file);
+        }
+
+        function showCapacityInfo(totalPixels) {
+            const maxBytes = Math.floor(totalPixels / 8);
+            const maxKB = (maxBytes / 1024).toFixed(1);
+            const capacityDiv = document.getElementById('imageCapacity');
+            capacityDiv.innerHTML = `📊 Storage Capacity: ~${maxKB}KB of data can be hidden in this image`;
+            capacityDiv.classList.remove('hidden');
         }
 
         function updateUploadArea(areaId, text) {
@@ -584,125 +629,212 @@
                 return;
             }
 
-            showProgress('encodeProgress', true);
+            const progressContainer = document.getElementById('encodeProgress');
+            const progressFill = progressContainer.querySelector('.progress-fill');
+            const progressText = progressContainer.querySelector('.progress-text');
+            
+            showProgress(progressContainer, progressFill, progressText, true, 'Preparing data...');
             
             try {
                 let dataToHide = { text: secretText, file: null };
 
                 if (secretFile) {
+                    progressText.textContent = 'Reading file...';
                     const fileData = await readFileAsBase64(secretFile);
                     dataToHide.file = {
                         name: secretFile.name,
                         type: secretFile.type,
                         data: fileData
                     };
+                    updateProgress(progressFill, 25);
                 }
 
                 let jsonData = JSON.stringify(dataToHide);
 
                 if (password) {
+                    progressText.textContent = 'Encrypting data...';
                     jsonData = await encryptData(jsonData, password);
+                    updateProgress(progressFill, 40);
                 }
 
-                const encodedImage = await hideDataInImage(currentImage, jsonData);
+                progressText.textContent = 'Encoding data into image...';
+                const encodedImage = await hideDataInImage(currentImage, jsonData, progressFill, progressText);
                 encodedImageData = encodedImage;
 
                 document.getElementById('encodedImage').src = encodedImage;
                 document.getElementById('encodeResult').classList.add('show');
-                showProgress('encodeProgress', false);
+                
+                updateProgress(progressFill, 100);
+                progressText.textContent = 'Complete!';
+                
+                setTimeout(() => {
+                    showProgress(progressContainer, progressFill, progressText, false);
+                }, 1000);
                 
                 showAlert('Data successfully hidden in image!', 'success');
             } catch (error) {
                 showAlert('Encoding failed: ' + error.message, 'error');
-                showProgress('encodeProgress', false);
+                showProgress(progressContainer, progressFill, progressText, false);
             }
         }
 
         async function decodeData() {
-            if (!currentImage) {
+            if (!currentDecodeImage) {
                 showAlert('Please upload an encoded image first.', 'error');
                 return;
             }
 
             const password = document.getElementById('decodePassword').value;
-            showProgress('decodeProgress', true);
+            const progressContainer = document.getElementById('decodeProgress');
+            const progressFill = progressContainer.querySelector('.progress-fill');
+            const progressText = progressContainer.querySelector('.progress-text');
+            
+            showProgress(progressContainer, progressFill, progressText, true, 'Extracting data...');
 
             try {
-                let extractedData = await extractDataFromImage(currentImage);
+                let extractedData = await extractDataFromImage(currentDecodeImage, progressFill, progressText);
+                updateProgress(progressFill, 70);
 
                 if (password) {
+                    progressText.textContent = 'Decrypting data...';
                     extractedData = await decryptData(extractedData, password);
+                    updateProgress(progressFill, 90);
                 }
 
+                progressText.textContent = 'Processing results...';
                 const parsedData = JSON.parse(extractedData);
                 displayDecodedData(parsedData);
 
                 document.getElementById('decodeResult').classList.add('show');
-                showProgress('decodeProgress', false);
+                updateProgress(progressFill, 100);
+                progressText.textContent = 'Complete!';
+                
+                setTimeout(() => {
+                    showProgress(progressContainer, progressFill, progressText, false);
+                }, 1000);
                 
                 showAlert('Data successfully extracted from image!', 'success');
             } catch (error) {
                 showAlert('Decoding failed: ' + error.message, 'error');
-                showProgress('decodeProgress', false);
+                showProgress(progressContainer, progressFill, progressText, false);
             }
         }
 
-        async function hideDataInImage(image, data) {
-            const canvas = document.getElementById('encodedCanvas');
-            const ctx = canvas.getContext('2d');
-            
-            canvas.width = image.width;
-            canvas.height = image.height;
-            ctx.drawImage(image, 0, 0);
-
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const pixels = imageData.data;
-
-            const binaryData = stringToBinary(data);
-            const delimiter = '1111111111111110';
-            const fullData = binaryData + delimiter;
-
-            if (fullData.length > pixels.length / 4) {
-                throw new Error('Image is too small to hide this amount of data.');
-            }
-
-            for (let i = 0; i < fullData.length; i++) {
-                const pixelIndex = i * 4;
-                pixels[pixelIndex] = (pixels[pixelIndex] & 0xFE) | parseInt(fullData[i]);
-            }
-
-            ctx.putImageData(imageData, 0, 0);
-            return canvas.toDataURL('image/png');
-        }
-
-        async function extractDataFromImage(image) {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            
-            canvas.width = image.width;
-            canvas.height = image.height;
-            ctx.drawImage(image, 0, 0);
-
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const pixels = imageData.data;
-
-            let binaryData = '';
-            const delimiter = '1111111111111110';
-
-            for (let i = 0; i < pixels.length; i += 4) {
-                binaryData += (pixels[i] & 1).toString();
+        async function hideDataInImage(image, data, progressFill, progressText) {
+            return new Promise((resolve, reject) => {
+                const canvas = document.getElementById('encodedCanvas');
+                const ctx = canvas.getContext('2d');
                 
-                if (binaryData.includes(delimiter)) {
-                    binaryData = binaryData.substring(0, binaryData.indexOf(delimiter));
-                    break;
+                canvas.width = image.width;
+                canvas.height = image.height;
+                ctx.drawImage(image, 0, 0);
+
+                // Use setTimeout to allow UI updates
+                setTimeout(async () => {
+                    try {
+                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const pixels = imageData.data;
+
+                        const binaryData = stringToBinary(data);
+                        const delimiter = '1111111111111110';
+                        const fullData = binaryData + delimiter;
+
+                        if (fullData.length > pixels.length / 4) {
+                            reject(new Error('Image is too small to hide this amount of data.'));
+                            return;
+                        }
+
+                        updateProgress(progressFill, 50);
+                        progressText.textContent = 'Modifying pixels...';
+
+                        // Process in chunks to avoid blocking the UI
+                        await processPixelsInChunks(pixels, fullData, progressFill, progressText, 50, 90);
+
+                        progressText.textContent = 'Finalizing image...';
+                        ctx.putImageData(imageData, 0, 0);
+                        resolve(canvas.toDataURL('image/png'));
+                    } catch (error) {
+                        reject(error);
+                    }
+                }, 10);
+            });
+        }
+
+        async function extractDataFromImage(image, progressFill, progressText) {
+            return new Promise((resolve, reject) => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                canvas.width = image.width;
+                canvas.height = image.height;
+                ctx.drawImage(image, 0, 0);
+
+                setTimeout(async () => {
+                    try {
+                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const pixels = imageData.data;
+
+                        updateProgress(progressFill, 30);
+                        progressText.textContent = 'Reading pixel data...';
+
+                        let binaryData = '';
+                        const delimiter = '1111111111111110';
+                        let found = false;
+
+                        // Process in chunks
+                        for (let i = 0; i < pixels.length && !found; i += CHUNK_SIZE * 4) {
+                            for (let j = i; j < Math.min(i + CHUNK_SIZE * 4, pixels.length) && !found; j += 4) {
+                                binaryData += (pixels[j] & 1).toString();
+                                
+                                if (binaryData.includes(delimiter)) {
+                                    binaryData = binaryData.substring(0, binaryData.indexOf(delimiter));
+                                    found = true;
+                                }
+                            }
+                            
+                            // Update progress
+                            const progress = 30 + (i / pixels.length) * 40;
+                            updateProgress(progressFill, progress);
+                            
+                            // Allow UI updates
+                            await new Promise(resolve => setTimeout(resolve, 1));
+                        }
+
+                        if (!found && binaryData.length === 0) {
+                            reject(new Error('No hidden data found in this image.'));
+                            return;
+                        }
+
+                        progressText.textContent = 'Converting data...';
+                        resolve(binaryToString(binaryData));
+                    } catch (error) {
+                        reject(error);
+                    }
+                }, 10);
+            });
+        }
+
+        async function processPixelsInChunks(pixels, fullData, progressFill, progressText, startProgress, endProgress) {
+            const totalChunks = Math.ceil(fullData.length / CHUNK_SIZE);
+            
+            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                const startIdx = chunkIndex * CHUNK_SIZE;
+                const endIdx = Math.min(startIdx + CHUNK_SIZE, fullData.length);
+                
+                for (let i = startIdx; i < endIdx; i++) {
+                    const pixelIndex = i * 4;
+                    pixels[pixelIndex] = (pixels[pixelIndex] & 0xFE) | parseInt(fullData[i]);
+                }
+                
+                // Update progress
+                const progress = startProgress + ((chunkIndex + 1) / totalChunks) * (endProgress - startProgress);
+                updateProgress(progressFill, progress);
+                
+                // Allow UI updates
+                if (chunkIndex % 10 === 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1));
                 }
             }
-
-            if (!binaryData.includes(delimiter) && binaryData.length === 0) {
-                throw new Error('No hidden data found in this image.');
-            }
-
-            return binaryToString(binaryData);
         }
 
         function stringToBinary(str) {
@@ -712,7 +844,9 @@
         }
 
         function binaryToString(binary) {
-            return binary.match(/.{8}/g).map(byte => 
+            const bytes = binary.match(/.{8}/g);
+            if (!bytes) return '';
+            return bytes.map(byte => 
                 String.fromCharCode(parseInt(byte, 2))
             ).join('');
         }
@@ -798,9 +932,10 @@
                 const fileDiv = document.createElement('div');
                 fileDiv.className = 'file-info';
                 fileDiv.innerHTML = `
-                    <h4>📁 Hidden File</h4>
+                    <h4>📎 Hidden File</h4>
                     <p><strong>Name:</strong> ${data.file.name}</p>
                     <p><strong>Type:</strong> ${data.file.type}</p>
+                    <p><strong>Size:</strong> ${(data.file.data.length * 3 / 4 / 1024).toFixed(2)} KB</p>
                     <button class="btn" onclick="downloadHiddenFile('${data.file.data}', '${data.file.name}', '${data.file.type}')" style="margin-top: 12px;">
                         💾 Download File
                     </button>
@@ -825,23 +960,19 @@
             link.click();
         }
 
-        function showProgress(progressId, show) {
-            const progress = document.getElementById(progressId);
+        function showProgress(container, fill, text, show, message = 'Processing...') {
             if (show) {
-                progress.classList.add('show');
-                const fill = progress.querySelector('.progress-fill');
-                let width = 0;
-                const interval = setInterval(() => {
-                    width += 10;
-                    fill.style.width = width + '%';
-                    if (width >= 90) {
-                        clearInterval(interval);
-                    }
-                }, 100);
+                container.classList.add('show');
+                fill.style.width = '0%';
+                text.textContent = message;
             } else {
-                progress.classList.remove('show');
-                progress.querySelector('.progress-fill').style.width = '0%';
+                container.classList.remove('show');
+                fill.style.width = '0%';
             }
+        }
+
+        function updateProgress(fill, percentage) {
+            fill.style.width = percentage + '%';
         }
 
         function showAlert(message, type) {
@@ -853,8 +984,67 @@
             alertDiv.textContent = message;
             document.body.appendChild(alertDiv);
 
-            setTimeout(() => alertDiv.remove(), 4000);
+            setTimeout(() => alertDiv.remove(), 5000);
         }
+
+        // Performance monitoring
+        function measurePerformance(operation, callback) {
+            const start = performance.now();
+            const result = callback();
+            const end = performance.now();
+            console.log(`${operation} took ${(end - start).toFixed(2)} milliseconds`);
+            return result;
+        }
+
+        // Memory management
+        function optimizeCanvasMemory() {
+            const canvases = document.querySelectorAll('canvas');
+            canvases.forEach(canvas => {
+                if (canvas.id !== 'encodedCanvas') {
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            });
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            optimizeCanvasMemory();
+            currentImage = null;
+            currentDecodeImage = null;
+            encodedImageData = null;
+        });
+
+        // Image compression for very large images
+        function compressImageIfNeeded(image, maxDimension = 2048) {
+            if (image.width <= maxDimension && image.height <= maxDimension) {
+                return image;
+            }
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const scale = Math.min(maxDimension / image.width, maxDimension / image.height);
+            canvas.width = image.width * scale;
+            canvas.height = image.height * scale;
+            
+            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+            
+            const compressedImage = new Image();
+            compressedImage.src = canvas.toDataURL('image/png');
+            return compressedImage;
+        }
+
+        // Enhanced error handling
+        window.addEventListener('error', (e) => {
+            console.error('Global error:', e.error);
+            showAlert('An unexpected error occurred. Please try again.', 'error');
+        });
+
+        window.addEventListener('unhandledrejection', (e) => {
+            console.error('Unhandled promise rejection:', e.reason);
+            showAlert('Operation failed. Please check your input and try again.', 'error');
+        });
     </script>
 </body>
 </html>
