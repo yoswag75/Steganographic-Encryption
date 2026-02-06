@@ -3,7 +3,7 @@
 A secure, client-side web application for Steganography. This tool allows users to hide secret text messages and files within innocent-looking images, protected by military-grade encryption.
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+![License](https://img.shields.io/badge/license-GNU-green.svg)
 ![Technology](https://img.shields.io/badge/tech-HTML5%20%7C%20CSS3%20%7C%20JS-orange.svg)
 
 ## 📖 Overview
